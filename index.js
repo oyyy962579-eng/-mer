@@ -1,39 +1,56 @@
 const { WebcastPushConnection } = require('tiktok-live-connector');
-const http = require('http');
 
-let currentGifts = { Gül: 0, Donut: 0, Parfüm: 0 };
+const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME || 'kullanici_adi';
+const TARGET_URL = process.env.TARGET_URL || 'https://senin-siten.netlify.app/api/gift';
+const PORT = process.env.PORT || 3000;
 
-const server = http.createServer((req, res) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Content-Type', 'application/json');
-    if (req.url === '/data') {
-        res.end(JSON.stringify(currentGifts));
-    } else {
-        res.end('Server is running');
-    }
-});
+const tiktokConnection = new WebcastPushConnection(TIKTOK_USERNAME);
 
-server.listen(process.env.PORT || 3000, () => {
-    console.log('Server started');
-});
+tiktokConnection
+  .connect()
+  .then((state) => {
+    console.log(`Bağlandı! Room ID: ${state.roomId} (@${TIKTOK_USERNAME})`);
+  })
+  .catch((err) => {
+    console.error('TikTok bağlantısı başarısız:', err);
+  });
 
-const tiktokUsername = '@yayinci_hesabi';
-const tiktokLiveConnection = new WebcastPushConnection(tiktokUsername);
+tiktokConnection.on('gift', async (data) => {
+  const giftPayload = {
+    uniqueId: data.uniqueId,
+    nickname: data.nickname,
+    giftId: data.giftId,
+    giftName: data.giftName,
+    repeatCount: data.repeatCount,
+    diamondCount: data.diamondCount,
+  };
 
-tiktokLiveConnection.connect().then(state => {
-    console.log(`Connected to ROOM ${state.roomInfo.roomId}`);
-}).catch(err => {
-    console.error('Connection failed', err);
-});
+  console.log('Hediye geldi:', giftPayload);
 
-tiktokLiveConnection.on('gift', data => {
-    if (currentGifts[data.giftName] !== undefined) {
-        currentGifts[data.giftName] += data.repeatCount;
-    }
-    
-    fetch('https://fanciful-puppy-7e9e4f.netlify.app/api/webhook', {
+  if (!TARGET_URL.includes('senin-siten.netlify.app')) {
+    try {
+      await fetch(TARGET_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gift: data.giftName, count: data.repeatCount, user: data.uniqueId })
-    }).catch(err => console.log('Webhook error', err));
+        body: JSON.stringify(giftPayload),
+      });
+    } catch (err) {
+      console.error('Hedef adrese gönderme hatası:', err);
+    }
+  }
 });
+
+tiktokConnection.on('disconnected', () => {
+  console.log('TikTok canlı yayın bağlantısı koptu.');
+});
+
+// Render web servisinin ayakta kalması için basit HTTP sunucusu
+const http = require('http');
+http
+  .createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok', username: TIKTOK_USERNAME }));
+  })
+  .listen(PORT, () => {
+    console.log(`Sunucu ${PORT} portunda çalışıyor.`);
+  });
