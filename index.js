@@ -1,62 +1,79 @@
+const http = require('http');
 const connectorPkg = require('tiktok-live-connector');
-console.log('LOADED_EXPORTS:', connectorPkg);
 
-const ConnectionClass =
+const TikTokClient =
   connectorPkg.TikTokLiveConnection ||
   connectorPkg.WebcastPushConnection ||
   connectorPkg.default ||
-  connectorPkg;
+  (typeof connectorPkg === 'function' ? connectorPkg : null);
 
 const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME || 'kullanici_adi';
-const TARGET_URL = process.env.TARGET_URL || 'https://senin-siten.netlify.app/api/gift';
+const TARGET_URL = process.env.TARGET_URL || '';
 const PORT = process.env.PORT || 3000;
 
-const tiktokConnection = new ConnectionClass(TIKTOK_USERNAME);
+let connectionStatus = 'waiting';
+let lastError = null;
+let lastGift = null;
 
-tiktokConnection
-  .connect()
-  .then((state) => {
-    console.log(`Bağlandı! Room ID: ${state.roomId} (@${TIKTOK_USERNAME})`);
-  })
-  .catch((err) => {
-    console.error('TikTok bağlantısı başarısız:', err);
-  });
+console.log('Export keys:', Object.keys(connectorPkg || {}));
 
-tiktokConnection.on('gift', async (data) => {
-  const giftPayload = {
-    uniqueId: data.uniqueId,
-    nickname: data.nickname,
-    giftId: data.giftId,
-    giftName: data.giftName,
-    repeatCount: data.repeatCount,
-    diamondCount: data.diamondCount,
-  };
+if (typeof TikTokClient === 'function') {
+  const client = new TikTokClient(TIKTOK_USERNAME);
 
-  console.log('Hediye geldi:', giftPayload);
+  client
+    .connect()
+    .then((state) => {
+      connectionStatus = 'connected';
+      lastError = null;
+      console.log(`TikTok yayinina baglandi. Room ID: ${state.roomId}`);
+    })
+    .catch((err) => {
+      connectionStatus = 'disconnected';
+      lastError = err && err.message ? err.message : String(err);
+      console.log('TikTok baglanti notu:', lastError);
+    });
 
-  if (!TARGET_URL.includes('senin-siten.netlify.app')) {
-    try {
-      await fetch(TARGET_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(giftPayload),
-      });
-    } catch (err) {
-      console.error('Hedef adrese gönderme hatası:', err);
+  client.on('gift', async (data) => {
+    lastGift = {
+      user: data.uniqueId,
+      giftName: data.giftName,
+      repeatCount: data.repeatCount || 1,
+      time: new Date().toISOString(),
+    };
+    console.log('Hediye geldi:', lastGift);
+
+    if (TARGET_URL) {
+      try {
+        await fetch(TARGET_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(lastGift),
+        });
+      } catch (e) {
+        console.log('Hedef URL gonderim hatasi:', e.message);
+      }
     }
-  }
-});
-
-tiktokConnection.on('disconnected', () => {
-  console.log('TikTok canlı yayın bağlantısı koptu.');
-});
-
-const http = require('http');
-http
-  .createServer((req, res) => {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', username: TIKTOK_USERNAME }));
-  })
-  .listen(PORT, () => {
-    console.log(`Sunucu ${PORT} portunda çalışıyor.`);
   });
+} else {
+  connectionStatus = 'export_mismatch';
+  lastError = 'Uygun baglanti sinifi bulunamadi.';
+  console.log(lastError);
+}
+
+const server = http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(
+    JSON.stringify({
+      ok: true,
+      service: 'tiktok-gift-bot',
+      status: connectionStatus,
+      username: TIKTOK_USERNAME,
+      lastError,
+      lastGift,
+    })
+  );
+});
+
+server.listen(PORT, () => {
+  console.log(`HTTP sunucu ${PORT} portunda calisiyor.`);
+});
