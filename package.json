@@ -6,6 +6,6 @@
     "start": "node index.js"
   },
   "dependencies": {
-    "tiktok-live-connector": "^1.2.5"
+    "tiktok-live-connector": "latest"
   }
 }
