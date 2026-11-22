@@ -12,7 +12,7 @@ const DEFAULT_USERNAME = (process.env.TIKTOK_USERNAME || '').trim();
 const TARGET_URL = (process.env.TARGET_URL || '').trim();
 const PORT = process.env.PORT || 3000;
 
-// Her kullanıcı adı için ayrı bağlantı ve son hediye bilgisini tutar
+// Her kullanici adi icin baglanti, durum ve son hediye bilgisini tutar
 const sessions = new Map();
 
 function cleanUsername(raw) {
@@ -20,6 +20,56 @@ function cleanUsername(raw) {
     .trim()
     .replace(/^@+/, '')
     .toLowerCase();
+}
+
+function extractGiftData(channel, data) {
+  const senderUser =
+    data?.uniqueId ||
+    data?.user?.uniqueId ||
+    data?.sender?.uniqueId ||
+    data?.userInfo?.uniqueId ||
+    'bilinmiyor';
+
+  const senderNickname =
+    data?.nickname ||
+    data?.user?.nickname ||
+    data?.sender?.nickname ||
+    data?.userInfo?.nickname ||
+    '';
+
+  const resolvedGiftName =
+    data?.giftName ||
+    data?.gift?.name ||
+    data?.giftDetails?.giftName ||
+    data?.extendedGiftInfo?.name ||
+    data?.giftInfo?.name ||
+    'hediye';
+
+  const resolvedGiftId =
+    data?.giftId ||
+    data?.gift?.id ||
+    data?.giftDetails?.giftId ||
+    null;
+
+  const resolvedDiamonds =
+    data?.diamondCount ||
+    data?.gift?.diamondCount ||
+    data?.giftDetails?.diamondCount ||
+    data?.extendedGiftInfo?.diamondCount ||
+    0;
+
+  const repeatCount = data?.repeatCount || 1;
+
+  return {
+    channel,
+    user: senderUser,
+    nickname: senderNickname,
+    giftId: resolvedGiftId,
+    giftName: resolvedGiftName,
+    repeatCount,
+    diamondCount: resolvedDiamonds,
+    time: new Date().toISOString(),
+  };
 }
 
 async function connectUser(rawUsername) {
@@ -32,7 +82,7 @@ async function connectUser(rawUsername) {
     return { ok: false, error: 'TikTok baglanti sinifi yuklenemedi.' };
   }
 
-  // Varsa eski bağlantıyı kapat
+  // Ayni kullanici icin eski baglanti varsa temiz kapat
   const existing = sessions.get(username);
   if (existing && existing.client && typeof existing.client.disconnect === 'function') {
     try {
@@ -45,7 +95,8 @@ async function connectUser(rawUsername) {
     status: 'connecting',
     roomId: null,
     lastError: null,
-    lastGift: null,
+    lastGift: existing?.lastGift || null,
+    _lastGiftKey: null,
     updatedAt: new Date().toISOString(),
     client: null,
   };
@@ -58,7 +109,7 @@ async function connectUser(rawUsername) {
     .connect()
     .then((connState) => {
       stateObj.status = 'connected';
-      stateObj.roomId = connState && connState.roomId ? connState.roomId : null;
+      stateObj.roomId = connState && connState.roomId ? String(connState.roomId) : null;
       stateObj.lastError = null;
       stateObj.updatedAt = new Date().toISOString();
       console.log(`[${username}] yayina baglandi. Room ID: ${stateObj.roomId}`);
@@ -71,15 +122,14 @@ async function connectUser(rawUsername) {
     });
 
   client.on('gift', async (data) => {
-    const giftPayload = {
-      channel: username,
-      user: data.uniqueId,
-      nickname: data.nickname,
-      giftName: data.giftName,
-      repeatCount: data.repeatCount || 1,
-      diamondCount: data.diamondCount || 0,
-      time: new Date().toISOString(),
-    };
+    const giftPayload = extractGiftData(username, data);
+    const dedupKey = `${giftPayload.user}|${giftPayload.giftName}|${giftPayload.repeatCount}|${giftPayload.diamondCount}`;
+
+    // Ayni anda arka arkaya gelen birebir ayni kopya veriyi suz
+    if (stateObj._lastGiftKey === dedupKey) {
+      return;
+    }
+    stateObj._lastGiftKey = dedupKey;
 
     stateObj.lastGift = giftPayload;
     stateObj.updatedAt = new Date().toISOString();
@@ -102,6 +152,13 @@ async function connectUser(rawUsername) {
     stateObj.status = 'disconnected';
     stateObj.updatedAt = new Date().toISOString();
     console.log(`[${username}] baglantisi koptu.`);
+  });
+
+  client.on('error', (err) => {
+    const msg = err && err.message ? err.message : String(err);
+    stateObj.lastError = msg;
+    stateObj.updatedAt = new Date().toISOString();
+    console.log(`[${username}] istemci hatasi:`, msg);
   });
 
   return {
