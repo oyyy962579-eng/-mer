@@ -1,10 +1,17 @@
-const { WebcastPushConnection } = require('tiktok-live-connector');
+const connectorPkg = require('tiktok-live-connector');
+console.log('LOADED_EXPORTS:', connectorPkg);
+
+const ConnectionClass =
+  connectorPkg.TikTokLiveConnection ||
+  connectorPkg.WebcastPushConnection ||
+  connectorPkg.default ||
+  connectorPkg;
 
 const TIKTOK_USERNAME = process.env.TIKTOK_USERNAME || 'kullanici_adi';
 const TARGET_URL = process.env.TARGET_URL || 'https://senin-siten.netlify.app/api/gift';
 const PORT = process.env.PORT || 3000;
 
-const tiktokConnection = new WebcastPushConnection(TIKTOK_USERNAME);
+const tiktokConnection = new ConnectionClass(TIKTOK_USERNAME);
 
 tiktokConnection
   .connect()
@@ -44,7 +51,6 @@ tiktokConnection.on('disconnected', () => {
   console.log('TikTok canlı yayın bağlantısı koptu.');
 });
 
-// Render web servisinin ayakta kalması için basit HTTP sunucusu
 const http = require('http');
 http
   .createServer((req, res) => {
