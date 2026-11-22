@@ -15,10 +15,8 @@ let connectionStatus = 'waiting';
 let lastError = null;
 let lastGift = null;
 
-console.log('Export keys:', Object.keys(connectorPkg || {}));
-
 if (typeof TikTokClient === 'function') {
-  const client = new TikTokClient(TIKTOK_USERNAME);
+  const client = new TikTokClient(TIKTOK_USERNAME, {});
 
   client
     .connect()
